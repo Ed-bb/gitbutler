@@ -22,12 +22,39 @@ export enum DefinedFocusable {
 
 export type Focusable = DefinedFocusable | string;
 
+export type KeyboardHandler = (event: KeyboardEvent, context: FocusContext) => boolean | void;
+
+export interface FocusContext {
+	element: HTMLElement;
+	logicalId: Focusable;
+	manager: FocusManager;
+}
+
+export interface FocusableOptions {
+	id: Focusable;
+	parentId?: Focusable | null;
+	// Event handlers
+	onKeydown?: KeyboardHandler;
+	onFocus?: (context: FocusContext) => void;
+	onBlur?: (context: FocusContext) => void;
+	// Navigation behavior
+	priority?: number; // Higher priority elements are preferred when multiple candidates exist
+	tabIndex?: number; // Custom tab order within siblings
+	disabled?: boolean; // Skip this element during navigation
+	// Metadata
+	displayName?: string; // Human-readable name for debugging
+	description?: string; // Additional context
+	tags?: string[]; // Searchable tags
+}
+
 interface ElementMetadata {
 	logicalId: Focusable;
 	parentElement: HTMLElement | null;
 	children: HTMLElement[]; // Preserve registration order
 	// Track registration state
 	registrationTime: number;
+	// Extended options
+	options: FocusableOptions;
 }
 
 interface PendingRelationship {
@@ -119,8 +146,39 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		}
 	}
 
-	register(logicalId: Focusable, parentId: Focusable | null, element: HTMLElement) {
+	// Primary registration method with full options
+	register(options: FocusableOptions, element: HTMLElement): void;
+	// Backwards compatible overload
+	register(logicalId: Focusable, parentId: Focusable | null, element: HTMLElement): void;
+	// Implementation
+	register(
+		optionsOrId: FocusableOptions | Focusable, 
+		parentIdOrElement: Focusable | null | HTMLElement, 
+		element?: HTMLElement
+	) {
+		let options: FocusableOptions;
+		let targetElement: HTMLElement;
+
+		// Handle overloads
+		if (typeof optionsOrId === 'object' && 'id' in optionsOrId) {
+			// New signature: register(options, element)
+			options = optionsOrId;
+			targetElement = parentIdOrElement as HTMLElement;
+		} else {
+			// Legacy signature: register(id, parentId, element)
+			options = {
+				id: optionsOrId as Focusable,
+				parentId: parentIdOrElement as Focusable | null
+			};
+			targetElement = element!;
+		}
+
+		this.doRegister(options, targetElement);
+	}
+
+	private doRegister(options: FocusableOptions, element: HTMLElement) {
 		const registrationTime = Date.now();
+		const { id: logicalId, parentId } = options;
 
 		// Remove any existing registration for this element
 		this.unregisterElement(element);
@@ -152,7 +210,8 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 			logicalId,
 			parentElement,
 			children: [], // Preserve order
-			registrationTime
+			registrationTime,
+			options
 		};
 
 		this.elementRegistry.set(element, metadata);
@@ -174,6 +233,19 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 
 		// Try to resolve any pending relationships now that this element is registered
 		this.resolvePendingRelationships(logicalId, element);
+
+		// Trigger onFocus if this becomes the current element
+		if (options.onFocus && this._currentElement === element) {
+			options.onFocus(this.createContext(element, metadata));
+		}
+	}
+
+	private createContext(element: HTMLElement, metadata: ElementMetadata): FocusContext {
+		return {
+			element,
+			logicalId: metadata.logicalId,
+			manager: this
+		};
 	}
 
 	private unregisterElement(element: HTMLElement) {
@@ -318,13 +390,26 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		}
 
 		if (targetElement && this.elementRegistry.has(targetElement)) {
+			const previousElement = this._currentElement;
+			const previousMeta = previousElement ? this.elementRegistry.get(previousElement) : null;
+			const newMeta = this.elementRegistry.get(targetElement)!;
+
+			// Call onBlur for previous element
+			if (previousElement && previousMeta?.options.onBlur) {
+				previousMeta.options.onBlur(this.createContext(previousElement, previousMeta));
+			}
+
 			this._currentElement = targetElement;
+
+			// Call onFocus for new element
+			if (newMeta.options.onFocus) {
+				newMeta.options.onFocus(this.createContext(targetElement, newMeta));
+			}
 		}
 	}
 
 	private selectBestCandidate(candidates: HTMLElement[]): HTMLElement {
-		// Strategy: prefer visible elements, then most recently registered
-		// Since arrays preserve order, the last element is the most recently registered
+		// Strategy: prefer enabled, visible, high-priority elements
 		let bestCandidate = candidates[0]!;
 		let bestScore = this.scoreElement(bestCandidate);
 
@@ -343,7 +428,13 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		const meta = this.elementRegistry.get(element);
 		if (!meta) return 0;
 
+		// Disabled elements get very low score
+		if (meta.options.disabled) return -1000;
+
 		let score = 0;
+		
+		// Priority boost (default 0)
+		score += (meta.options.priority || 0) * 1000;
 		
 		// Prefer visible elements
 		const rect = element.getBoundingClientRect();
@@ -386,6 +477,27 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		}
 	}
 
+	private sortSiblingsByTabOrder(siblings: HTMLElement[]): HTMLElement[] {
+		return siblings
+			.filter(sibling => {
+				const meta = this.elementRegistry.get(sibling);
+				return meta && !meta.options.disabled;
+			})
+			.sort((a, b) => {
+				const metaA = this.elementRegistry.get(a)!;
+				const metaB = this.elementRegistry.get(b)!;
+				
+				const tabA = metaA.options.tabIndex ?? 0;
+				const tabB = metaB.options.tabIndex ?? 0;
+				
+				// First sort by tabIndex
+				if (tabA !== tabB) return tabA - tabB;
+				
+				// Then by registration order (already in array order)
+				return siblings.indexOf(a) - siblings.indexOf(b);
+			});
+	}
+
 	focusSibling(forward = true) {
 		if (!this._currentElement) return;
 		
@@ -396,7 +508,9 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		const parentMeta = this.elementRegistry.get(metadata.parentElement);
 		if (!parentMeta) return;
 
-		const siblings = parentMeta.children; // Already an array, preserves order
+		const siblings = this.sortSiblingsByTabOrder(parentMeta.children);
+		if (siblings.length === 0) return;
+
 		const currentIndex = siblings.indexOf(this._currentElement);
 		if (currentIndex === -1) return;
 
@@ -437,6 +551,19 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 	}
 
 	handleKeydown(event: KeyboardEvent) {
+		// Try custom handler first if current element has one
+		if (this._currentElement) {
+			const metadata = this.elementRegistry.get(this._currentElement);
+			if (metadata?.options.onKeydown) {
+				const context = this.createContext(this._currentElement, metadata);
+				const handled = metadata.options.onKeydown(event, context);
+				if (handled !== false) { // If handler returns false, continue with default behavior
+					return;
+				}
+			}
+		}
+
+		// Default keyboard handling
 		if (event.key === 'Tab') {
 			event.preventDefault();
 			this.focusSibling(!event.shiftKey);
@@ -475,12 +602,81 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		return reactive(() => current);
 	}
 
+	// Utility methods for working with extended data
+	findElementsByTag(tag: string): HTMLElement[] {
+		const result: HTMLElement[] = [];
+		for (const [element, metadata] of this.elementRegistry) {
+			if (metadata.options.tags?.includes(tag)) {
+				result.push(element);
+			}
+		}
+		return result;
+	}
+
+	findElementsByDisplayName(name: string): HTMLElement[] {
+		const result: HTMLElement[] = [];
+		for (const [element, metadata] of this.elementRegistry) {
+			if (metadata.options.displayName === name) {
+				result.push(element);
+			}
+		}
+		return result;
+	}
+
+	getElementOptions(elementOrId: HTMLElement | Focusable): FocusableOptions | null {
+		let element: HTMLElement | undefined;
+		
+		if (elementOrId instanceof HTMLElement) {
+			element = elementOrId;
+		} else {
+			const candidates = this.logicalIndex.get(elementOrId);
+			if (candidates && candidates.length > 0) {
+				element = this.selectBestCandidate(candidates);
+			}
+		}
+		
+		if (element) {
+			const metadata = this.elementRegistry.get(element);
+			return metadata?.options || null;
+		}
+		
+		return null;
+	}
+
+	updateElementOptions(elementOrId: HTMLElement | Focusable, updates: Partial<FocusableOptions>): boolean {
+		let element: HTMLElement | undefined;
+		
+		if (elementOrId instanceof HTMLElement) {
+			element = elementOrId;
+		} else {
+			const candidates = this.logicalIndex.get(elementOrId);
+			if (candidates && candidates.length > 0) {
+				element = this.selectBestCandidate(candidates);
+			}
+		}
+		
+		if (element) {
+			const metadata = this.elementRegistry.get(element);
+			if (metadata) {
+				// Merge updates into existing options
+				metadata.options = { ...metadata.options, ...updates };
+				return true;
+			}
+		}
+		
+		return false;
+	}
+
 	// Debug utilities
 	getRegistrationStats() {
 		return {
 			registered: this.elementRegistry.size,
 			pending: this.pendingRelationships.length,
-			logicalIds: this.logicalIndex.size
+			logicalIds: this.logicalIndex.size,
+			disabled: Array.from(this.elementRegistry.values()).filter(m => m.options.disabled).length,
+			withCustomHandlers: Array.from(this.elementRegistry.values()).filter(m => 
+				m.options.onKeydown || m.options.onFocus || m.options.onBlur
+			).length
 		};
 	}
 
@@ -490,5 +686,32 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 			parentId: p.parentId,
 			age: Date.now() - p.registrationTime
 		}));
+	}
+
+	getElementTree(): Record<string, any> {
+		const result: Record<string, any> = {};
+		
+		for (const [element, metadata] of this.elementRegistry) {
+			const key = `${metadata.logicalId} (${metadata.options.displayName || 'unnamed'})`;
+			result[key] = {
+				disabled: metadata.options.disabled,
+				priority: metadata.options.priority,
+				tabIndex: metadata.options.tabIndex,
+				tags: metadata.options.tags,
+				hasHandlers: {
+					onKeydown: !!metadata.options.onKeydown,
+					onFocus: !!metadata.options.onFocus,
+					onBlur: !!metadata.options.onBlur
+				},
+				children: metadata.children.map(child => {
+					const childMeta = this.elementRegistry.get(child);
+					return childMeta ? 
+						`${childMeta.logicalId} (${childMeta.options.displayName || 'unnamed'})` : 
+						'unknown';
+				})
+			};
+		}
+		
+		return result;
 	}
 }
