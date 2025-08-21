@@ -25,7 +25,7 @@ export type Focusable = DefinedFocusable | string;
 interface ElementMetadata {
 	logicalId: Focusable;
 	parentElement: HTMLElement | null;
-	children: Set<HTMLElement>;
+	children: HTMLElement[]; // Preserve registration order
 	// Track registration state
 	registrationTime: number;
 }
@@ -46,8 +46,8 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 	// Physical registry: element -> metadata
 	private elementRegistry = new Map<HTMLElement, ElementMetadata>();
 	
-	// Logical index: for queries and bulk operations
-	private logicalIndex = new Map<Focusable, Set<HTMLElement>>();
+	// Logical index: for queries and bulk operations (preserve registration order)
+	private logicalIndex = new Map<Focusable, HTMLElement[]>();
 	
 	// Reverse lookup: element -> focusable for click handling
 	private elementLookup = new Map<HTMLElement, HTMLElement>();
@@ -68,6 +68,37 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 				on(document, 'keypress', this.handleKeys)
 			);
 		});
+	}
+
+	// Helper methods for managing arrays without duplicates while preserving order
+	private addToLogicalIndex(logicalId: Focusable, element: HTMLElement) {
+		const array = this.logicalIndex.get(logicalId)!;
+		if (!array.includes(element)) {
+			array.push(element);
+		}
+	}
+
+	private removeFromLogicalIndex(logicalId: Focusable, element: HTMLElement) {
+		const array = this.logicalIndex.get(logicalId);
+		if (array) {
+			const index = array.indexOf(element);
+			if (index !== -1) {
+				array.splice(index, 1);
+			}
+		}
+	}
+
+	private addChild(parentMeta: ElementMetadata, childElement: HTMLElement) {
+		if (!parentMeta.children.includes(childElement)) {
+			parentMeta.children.push(childElement);
+		}
+	}
+
+	private removeChild(parentMeta: ElementMetadata, childElement: HTMLElement) {
+		const index = parentMeta.children.indexOf(childElement);
+		if (index !== -1) {
+			parentMeta.children.splice(index, 1);
+		}
 	}
 
 	get current(): Focusable | undefined {
@@ -120,7 +151,7 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		const metadata: ElementMetadata = {
 			logicalId,
 			parentElement,
-			children: new Set(),
+			children: [], // Preserve order
 			registrationTime
 		};
 
@@ -129,15 +160,15 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 
 		// Update logical index
 		if (!this.logicalIndex.has(logicalId)) {
-			this.logicalIndex.set(logicalId, new Set());
+			this.logicalIndex.set(logicalId, []);
 		}
-		this.logicalIndex.get(logicalId)!.add(element);
+		this.addToLogicalIndex(logicalId, element);
 
 		// Link to parent if found
 		if (parentElement) {
 			const parentMeta = this.elementRegistry.get(parentElement);
 			if (parentMeta) {
-				parentMeta.children.add(element);
+				this.addChild(parentMeta, element);
 			}
 		}
 
@@ -150,19 +181,17 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		if (!existing) return;
 
 		// Remove from logical index
-		const logicalSet = this.logicalIndex.get(existing.logicalId);
-		if (logicalSet) {
-			logicalSet.delete(element);
-			if (logicalSet.size === 0) {
-				this.logicalIndex.delete(existing.logicalId);
-			}
+		this.removeFromLogicalIndex(existing.logicalId, element);
+		const logicalArray = this.logicalIndex.get(existing.logicalId);
+		if (logicalArray && logicalArray.length === 0) {
+			this.logicalIndex.delete(existing.logicalId);
 		}
 
 		// Remove from parent's children
 		if (existing.parentElement) {
 			const parentMeta = this.elementRegistry.get(existing.parentElement);
 			if (parentMeta) {
-				parentMeta.children.delete(element);
+				this.removeChild(parentMeta, element);
 			}
 		}
 
@@ -180,7 +209,7 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 
 	private findRegisteredParent(parentId: Focusable): HTMLElement | null {
 		const candidates = this.logicalIndex.get(parentId);
-		if (!candidates || candidates.size === 0) return null;
+		if (!candidates || candidates.length === 0) return null;
 
 		// If multiple candidates, prefer the most recently registered
 		// (assumption: more recent registration is more relevant)
@@ -225,7 +254,10 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 				if (childMeta && this.isValidParentChild(newElement, pending.childElement)) {
 					// Link them up
 					childMeta.parentElement = newElement;
-					this.elementRegistry.get(newElement)?.children.add(pending.childElement);
+					const parentMeta = this.elementRegistry.get(newElement);
+					if (parentMeta) {
+						this.addChild(parentMeta, pending.childElement);
+					}
 					resolved.push(i);
 				}
 			}
@@ -280,7 +312,7 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		} else {
 			// Find element with this logicalId - prefer most recent or first in DOM order
 			const candidates = this.logicalIndex.get(elementOrId);
-			if (candidates && candidates.size > 0) {
+			if (candidates && candidates.length > 0) {
 				targetElement = this.selectBestCandidate(candidates);
 			}
 		}
@@ -290,9 +322,10 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		}
 	}
 
-	private selectBestCandidate(candidates: Set<HTMLElement>): HTMLElement {
+	private selectBestCandidate(candidates: HTMLElement[]): HTMLElement {
 		// Strategy: prefer visible elements, then most recently registered
-		let bestCandidate = candidates.values().next().value;
+		// Since arrays preserve order, the last element is the most recently registered
+		let bestCandidate = candidates[0]!;
 		let bestScore = this.scoreElement(bestCandidate);
 
 		for (const candidate of candidates) {
@@ -343,7 +376,10 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 			if (this.elementRegistry.has(current)) {
 				// Found a registered ancestor - link them
 				metadata.parentElement = current;
-				this.elementRegistry.get(current)?.children.add(element);
+				const parentMeta = this.elementRegistry.get(current);
+				if (parentMeta) {
+					this.addChild(parentMeta, element);
+				}
 				break;
 			}
 			current = current.parentElement;
@@ -360,7 +396,7 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		const parentMeta = this.elementRegistry.get(metadata.parentElement);
 		if (!parentMeta) return;
 
-		const siblings = Array.from(parentMeta.children);
+		const siblings = parentMeta.children; // Already an array, preserves order
 		const currentIndex = siblings.indexOf(this._currentElement);
 		if (currentIndex === -1) return;
 
@@ -391,9 +427,9 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		
 		this.ensureRelationships(this._currentElement);
 		const metadata = this.elementRegistry.get(this._currentElement);
-		if (!metadata || metadata.children.size === 0) return;
+		if (!metadata || metadata.children.length === 0) return;
 
-		const firstChild = metadata.children.values().next().value;
+		const firstChild = metadata.children[0]; // First in registration order
 		if (firstChild) {
 			this.setActive(firstChild);
 			firstChild.focus();
