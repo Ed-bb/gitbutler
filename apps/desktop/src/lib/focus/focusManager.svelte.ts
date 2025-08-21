@@ -84,8 +84,6 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 
 	constructor() {
 		$effect(() => {
-			// We listen for events on the document in the bubble phase, giving
-			// other event handlers an opportunity to stop propagation.
 			return mergeUnlisten(
 				on(document, 'click', this.handleMouse, { capture: true }),
 				on(document, 'keypress', this.handleKeys)
