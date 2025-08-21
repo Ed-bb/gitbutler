@@ -22,21 +22,74 @@ export enum DefinedFocusable {
 
 export type Focusable = DefinedFocusable | string;
 
-export type KeyboardHandler = (event: KeyboardEvent, context: FocusContext) => boolean | void;
+// Common payload types for type safety
+export interface StackPayload {
+	stackId: string;
+	branchName?: string;
+	isActive?: boolean;
+}
 
-export interface FocusContext {
+export interface ItemPayload {
+	itemId: string;
+	index: number;
+	data?: any;
+}
+
+export interface FilePayload {
+	filePath: string;
+	isModified?: boolean;
+	lineCount?: number;
+}
+
+// Convenience factory functions for common use cases
+export function createStackOptions<TPayload extends StackPayload>(
+	parentId: Focusable,
+	payload: TPayload,
+	options?: Partial<FocusableOptions<TPayload>>
+): FocusableOptions<TPayload> {
+	return {
+		id: 'stack',
+		parentId,
+		payload,
+		displayName: `Stack: ${payload.stackId}`,
+		tags: ['stack'],
+		...options
+	};
+}
+
+export function createItemOptions<TPayload extends ItemPayload>(
+	parentId: Focusable,
+	payload: TPayload,
+	options?: Partial<FocusableOptions<TPayload>>
+): FocusableOptions<TPayload> {
+	return {
+		id: 'item',
+		parentId,
+		payload,
+		displayName: `Item ${payload.index}`,
+		tabIndex: payload.index,
+		tags: ['item'],
+		...options
+	};
+}
+
+export interface FocusContext<TPayload = any> {
 	element: HTMLElement;
 	logicalId: Focusable;
+	payload: TPayload;
 	manager: FocusManager;
 }
 
-export interface FocusableOptions {
+export type KeyboardHandler<TPayload = any> = (event: KeyboardEvent, context: FocusContext<TPayload>) => boolean | void;
+
+export interface FocusableOptions<TPayload = any> {
 	id: Focusable;
 	parentId?: Focusable | null;
+	payload?: TPayload; // Type-safe arbitrary data
 	// Event handlers
-	onKeydown?: KeyboardHandler;
-	onFocus?: (context: FocusContext) => void;
-	onBlur?: (context: FocusContext) => void;
+	onKeydown?: KeyboardHandler<TPayload>;
+	onFocus?: (context: FocusContext<TPayload>) => void;
+	onBlur?: (context: FocusContext<TPayload>) => void;
 	// Navigation behavior
 	priority?: number; // Higher priority elements are preferred when multiple candidates exist
 	tabIndex?: number; // Custom tab order within siblings
@@ -47,14 +100,14 @@ export interface FocusableOptions {
 	tags?: string[]; // Searchable tags
 }
 
-interface ElementMetadata {
+interface ElementMetadata<TPayload = any> {
 	logicalId: Focusable;
 	parentElement: HTMLElement | null;
 	children: HTMLElement[]; // Preserve registration order
 	// Track registration state
 	registrationTime: number;
 	// Extended options
-	options: FocusableOptions;
+	options: FocusableOptions<TPayload>;
 }
 
 interface PendingRelationship {
@@ -71,7 +124,7 @@ interface PendingRelationship {
  */
 export class FocusManager implements Reactive<Focusable | undefined> {
 	// Physical registry: element -> metadata
-	private elementRegistry = new Map<HTMLElement, ElementMetadata>();
+	private elementRegistry = new Map<HTMLElement, ElementMetadata<any>>();
 	
 	// Logical index: for queries and bulk operations (preserve registration order)
 	private logicalIndex = new Map<Focusable, HTMLElement[]>();
@@ -146,17 +199,17 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		}
 	}
 
-	// Primary registration method with full options
-	register(options: FocusableOptions, element: HTMLElement): void;
+	// Primary registration method with full options and type-safe payload
+	register<TPayload = any>(options: FocusableOptions<TPayload>, element: HTMLElement): void;
 	// Backwards compatible overload
 	register(logicalId: Focusable, parentId: Focusable | null, element: HTMLElement): void;
 	// Implementation
-	register(
-		optionsOrId: FocusableOptions | Focusable, 
+	register<TPayload = any>(
+		optionsOrId: FocusableOptions<TPayload> | Focusable, 
 		parentIdOrElement: Focusable | null | HTMLElement, 
 		element?: HTMLElement
 	) {
-		let options: FocusableOptions;
+		let options: FocusableOptions<TPayload>;
 		let targetElement: HTMLElement;
 
 		// Handle overloads
@@ -169,14 +222,14 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 			options = {
 				id: optionsOrId as Focusable,
 				parentId: parentIdOrElement as Focusable | null
-			};
+			} as FocusableOptions<TPayload>;
 			targetElement = element!;
 		}
 
 		this.doRegister(options, targetElement);
 	}
 
-	private doRegister(options: FocusableOptions, element: HTMLElement) {
+	private doRegister<TPayload = any>(options: FocusableOptions<TPayload>, element: HTMLElement) {
 		const registrationTime = Date.now();
 		const { id: logicalId, parentId } = options;
 
@@ -240,10 +293,11 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		}
 	}
 
-	private createContext(element: HTMLElement, metadata: ElementMetadata): FocusContext {
+	private createContext<TPayload = any>(element: HTMLElement, metadata: ElementMetadata<TPayload>): FocusContext<TPayload> {
 		return {
 			element,
 			logicalId: metadata.logicalId,
+			payload: metadata.options.payload as TPayload,
 			manager: this
 		};
 	}
@@ -623,7 +677,7 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		return result;
 	}
 
-	getElementOptions(elementOrId: HTMLElement | Focusable): FocusableOptions | null {
+	getElementOptions<TPayload = any>(elementOrId: HTMLElement | Focusable): FocusableOptions<TPayload> | null {
 		let element: HTMLElement | undefined;
 		
 		if (elementOrId instanceof HTMLElement) {
@@ -643,7 +697,7 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		return null;
 	}
 
-	updateElementOptions(elementOrId: HTMLElement | Focusable, updates: Partial<FocusableOptions>): boolean {
+	updateElementOptions<TPayload = any>(elementOrId: HTMLElement | Focusable, updates: Partial<FocusableOptions<TPayload>>): boolean {
 		let element: HTMLElement | undefined;
 		
 		if (elementOrId instanceof HTMLElement) {
@@ -715,3 +769,56 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		return result;
 	}
 }
+
+/*
+USAGE EXAMPLES:
+
+// Simple registration (backwards compatible)
+focusManager.register('workspace', null, workspaceElement);
+
+// Rich registration with typed payload
+focusManager.register({
+	id: 'stack',
+	parentId: 'workspace',
+	payload: { stackId: 'abc123', branchName: 'feature/new-ui' },
+	onKeydown: (event, context) => {
+		if (event.key === 'Delete') {
+			deleteStack(context.payload.stackId);
+			return true;
+		}
+	}
+}, stackElement);
+
+// Using factory functions for common patterns
+const stackOptions = createStackOptions('workspace', {
+	stackId: 'abc123',
+	branchName: 'feature/new-ui',
+	isActive: true
+}, {
+	priority: 10,
+	onFocus: (context) => {
+		highlightStack(context.payload.stackId);
+		updatePreview(context.payload.branchName);
+	}
+});
+
+focusManager.register(stackOptions, stackElement);
+
+// Multiple items with typed payloads
+items.forEach((item, index) => {
+	const itemOptions = createItemOptions('stack', {
+		itemId: item.id,
+		index,
+		data: item
+	}, {
+		onKeydown: (event, context) => {
+			if (event.key === 'Enter') {
+				selectItem(context.payload.data);
+				return true;
+			}
+		}
+	});
+	
+	focusManager.register(itemOptions, item.element);
+});
+*/
