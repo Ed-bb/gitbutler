@@ -766,7 +766,7 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 	getElementTree(): Record<string, any> {
 		const result: Record<string, any> = {};
 		
-		for (const [element, metadata] of this.elementRegistry) {
+		for (const [_element, metadata] of this.elementRegistry) {
 			const key = `${metadata.logicalId} (${metadata.options.displayName || 'unnamed'})`;
 			result[key] = {
 				disabled: metadata.options.disabled,

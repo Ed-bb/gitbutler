@@ -323,7 +323,7 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		let current = $state(validTriggers[0]!);
 		
 		$effect(() => {
-			let currentElement = this.elements.get(this._current || '');
+			const currentElement = this.elements.get(this._current || '');
 			if (!currentElement) return;
 
 			// Walk up the hierarchy to find a matching trigger
