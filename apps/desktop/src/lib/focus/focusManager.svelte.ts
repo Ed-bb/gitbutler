@@ -43,6 +43,8 @@ export function parseFocusableId(id: string): string | undefined {
 	return halves[1];
 }
 
+type Cursor = { setTarget(element: HTMLElement): void; show(): void };
+
 // Common payload types for type safety
 export interface StackPayload {
 	stackId: string;
@@ -101,7 +103,10 @@ export interface FocusContext<TPayload = any> {
 	manager: FocusManager;
 }
 
-export type KeyboardHandler<TPayload = any> = (event: KeyboardEvent, context: FocusContext<TPayload>) => boolean | void;
+export type KeyboardHandler<TPayload = any> = (
+	event: KeyboardEvent,
+	context: FocusContext<TPayload>
+) => boolean | void;
 
 export interface FocusableOptions<TPayload = any> {
 	id: Focusable;
@@ -146,19 +151,21 @@ interface PendingRelationship {
 export class FocusManager implements Reactive<Focusable | undefined> {
 	// Physical registry: element -> metadata
 	private elementRegistry = new Map<HTMLElement, ElementMetadata<any>>();
-	
+
 	// Logical index: for queries and bulk operations (preserve registration order)
 	private logicalIndex = new Map<Focusable, HTMLElement[]>();
-	
+
 	// Reverse lookup: element -> focusable for click handling
 	private elementLookup = new Map<HTMLElement, HTMLElement>();
-	
+
 	// Deferred relationships: parent hasn't been registered yet
 	private pendingRelationships: PendingRelationship[] = [];
-	
+
 	// Current focused element (physical)
 	private _currentElement: HTMLElement | undefined = $state();
-	
+
+	private cursor: Cursor | undefined;
+
 	private handleMouse = this.handleClick.bind(this);
 	private handleKeys = this.handleKeydown.bind(this);
 
@@ -166,7 +173,7 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		$effect(() => {
 			return mergeUnlisten(
 				on(document, 'click', this.handleMouse, { capture: true }),
-				on(document, 'keypress', this.handleKeys)
+				on(document, 'keydown', this.handleKeys)
 			);
 		});
 	}
@@ -226,8 +233,8 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 	register(logicalId: Focusable, parentId: Focusable | null, element: HTMLElement): void;
 	// Implementation
 	register<TPayload = any>(
-		optionsOrId: FocusableOptions<TPayload> | Focusable, 
-		parentIdOrElement: Focusable | null | HTMLElement, 
+		optionsOrId: FocusableOptions<TPayload> | Focusable,
+		parentIdOrElement: Focusable | null | HTMLElement,
 		element?: HTMLElement
 	) {
 		let options: FocusableOptions<TPayload>;
@@ -314,7 +321,10 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		}
 	}
 
-	private createContext<TPayload = any>(element: HTMLElement, metadata: ElementMetadata<TPayload>): FocusContext<TPayload> {
+	private createContext<TPayload = any>(
+		element: HTMLElement,
+		metadata: ElementMetadata<TPayload>
+	): FocusContext<TPayload> {
 		return {
 			element,
 			logicalId: metadata.logicalId,
@@ -376,7 +386,7 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 
 	private findParentInDOM(element: HTMLElement, parentId: Focusable): HTMLElement | null {
 		let current = element.parentElement;
-		
+
 		while (current) {
 			const metadata = this.elementRegistry.get(current);
 			if (metadata && metadata.logicalId === parentId) {
@@ -384,7 +394,7 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 			}
 			current = current.parentElement;
 		}
-		
+
 		return null;
 	}
 
@@ -394,7 +404,7 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 
 		for (let i = 0; i < this.pendingRelationships.length; i++) {
 			const pending = this.pendingRelationships[i]!;
-			
+
 			if (pending.parentId === newLogicalId) {
 				// This newly registered element might be the parent
 				const childMeta = this.elementRegistry.get(pending.childElement);
@@ -437,15 +447,17 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 
 		// Remove pending relationships
 		this.pendingRelationships = this.pendingRelationships.filter(
-			p => p.parentId !== logicalId && 
-			(!element || p.childElement !== element)
+			(p) => p.parentId !== logicalId && (!element || p.childElement !== element)
 		);
 
 		// Clear current if it matches
 		if (this._currentElement) {
 			const currentMeta = this.elementRegistry.get(this._currentElement);
-			if (!currentMeta || (element && this._currentElement === element) || 
-				(!element && currentMeta.logicalId === logicalId)) {
+			if (
+				!currentMeta ||
+				(element && this._currentElement === element) ||
+				(!element && currentMeta.logicalId === logicalId)
+			) {
 				this._currentElement = undefined;
 			}
 		}
@@ -480,6 +492,8 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 			if (newMeta.options.onFocus) {
 				newMeta.options.onFocus(this.createContext(targetElement, newMeta));
 			}
+
+			this.cursor?.setTarget(targetElement);
 		}
 	}
 
@@ -507,17 +521,17 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		if (meta.options.disabled) return -1000;
 
 		let score = 0;
-		
+
 		// Priority boost (default 0)
 		score += (meta.options.priority || 0) * 1000;
-		
+
 		// Prefer visible elements
 		const rect = element.getBoundingClientRect();
 		if (rect.width > 0 && rect.height > 0) score += 100;
-		
+
 		// Prefer more recently registered
 		score += meta.registrationTime / 1000000; // Scale down timestamp
-		
+
 		return score;
 	}
 
@@ -554,20 +568,20 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 
 	private sortSiblingsByTabOrder(siblings: HTMLElement[]): HTMLElement[] {
 		return siblings
-			.filter(sibling => {
+			.filter((sibling) => {
 				const meta = this.elementRegistry.get(sibling);
 				return meta && !meta.options.disabled;
 			})
 			.sort((a, b) => {
 				const metaA = this.elementRegistry.get(a)!;
 				const metaB = this.elementRegistry.get(b)!;
-				
+
 				const tabA = metaA.options.tabIndex ?? 0;
 				const tabB = metaB.options.tabIndex ?? 0;
-				
+
 				// First sort by tabIndex
 				if (tabA !== tabB) return tabA - tabB;
-				
+
 				// Then by registration order (already in array order)
 				return siblings.indexOf(a) - siblings.indexOf(b);
 			});
@@ -575,7 +589,7 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 
 	focusSibling(forward = true) {
 		if (!this._currentElement) return;
-		
+
 		this.ensureRelationships(this._currentElement);
 		const metadata = this.elementRegistry.get(this._currentElement);
 		if (!metadata?.parentElement) return;
@@ -589,7 +603,7 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		const currentIndex = siblings.indexOf(this._currentElement);
 		if (currentIndex === -1) return;
 
-		const nextIndex = forward 
+		const nextIndex = forward
 			? (currentIndex + 1) % siblings.length
 			: (currentIndex - 1 + siblings.length) % siblings.length;
 
@@ -602,7 +616,7 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 
 	focusParent() {
 		if (!this._currentElement) return;
-		
+
 		this.ensureRelationships(this._currentElement);
 		const metadata = this.elementRegistry.get(this._currentElement);
 		if (!metadata?.parentElement) return;
@@ -613,7 +627,7 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 
 	focusFirstChild() {
 		if (!this._currentElement) return;
-		
+
 		this.ensureRelationships(this._currentElement);
 		const metadata = this.elementRegistry.get(this._currentElement);
 		if (!metadata || metadata.children.length === 0) return;
@@ -627,12 +641,15 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 
 	handleKeydown(event: KeyboardEvent) {
 		// Try custom handler first if current element has one
+		console.log(event);
+		this.cursor?.show();
 		if (this._currentElement) {
 			const metadata = this.elementRegistry.get(this._currentElement);
 			if (metadata?.options.onKeydown) {
 				const context = this.createContext(this._currentElement, metadata);
 				const handled = metadata.options.onKeydown(event, context);
-				if (handled !== false) { // If handler returns false, continue with default behavior
+				if (handled !== false) {
+					// If handler returns false, continue with default behavior
 					return;
 				}
 			}
@@ -657,13 +674,13 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		}
 
 		let current = $state<Focusable | undefined>(args.triggers[0]);
-		
+
 		$effect(() => {
 			if (!this._currentElement) return;
-			
+
 			// Walk up the hierarchy to find a matching trigger
 			let searchElement: HTMLElement | null = this._currentElement;
-			
+
 			while (searchElement) {
 				const metadata = this.elementRegistry.get(searchElement);
 				if (metadata && args.triggers.includes(metadata.logicalId)) {
@@ -698,9 +715,11 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 		return result;
 	}
 
-	getElementOptions<TPayload = any>(elementOrId: HTMLElement | Focusable): FocusableOptions<TPayload> | null {
+	getElementOptions<TPayload = any>(
+		elementOrId: HTMLElement | Focusable
+	): FocusableOptions<TPayload> | null {
 		let element: HTMLElement | undefined;
-		
+
 		if (elementOrId instanceof HTMLElement) {
 			element = elementOrId;
 		} else {
@@ -709,18 +728,21 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 				element = this.selectBestCandidate(candidates);
 			}
 		}
-		
+
 		if (element) {
 			const metadata = this.elementRegistry.get(element);
 			return metadata?.options || null;
 		}
-		
+
 		return null;
 	}
 
-	updateElementOptions<TPayload = any>(elementOrId: HTMLElement | Focusable, updates: Partial<FocusableOptions<TPayload>>): boolean {
+	updateElementOptions<TPayload = any>(
+		elementOrId: HTMLElement | Focusable,
+		updates: Partial<FocusableOptions<TPayload>>
+	): boolean {
 		let element: HTMLElement | undefined;
-		
+
 		if (elementOrId instanceof HTMLElement) {
 			element = elementOrId;
 		} else {
@@ -729,7 +751,7 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 				element = this.selectBestCandidate(candidates);
 			}
 		}
-		
+
 		if (element) {
 			const metadata = this.elementRegistry.get(element);
 			if (metadata) {
@@ -738,7 +760,7 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 				return true;
 			}
 		}
-		
+
 		return false;
 	}
 
@@ -748,15 +770,15 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 			registered: this.elementRegistry.size,
 			pending: this.pendingRelationships.length,
 			logicalIds: this.logicalIndex.size,
-			disabled: Array.from(this.elementRegistry.values()).filter(m => m.options.disabled).length,
-			withCustomHandlers: Array.from(this.elementRegistry.values()).filter(m => 
-				m.options.onKeydown || m.options.onFocus || m.options.onBlur
+			disabled: Array.from(this.elementRegistry.values()).filter((m) => m.options.disabled).length,
+			withCustomHandlers: Array.from(this.elementRegistry.values()).filter(
+				(m) => m.options.onKeydown || m.options.onFocus || m.options.onBlur
 			).length
 		};
 	}
 
 	getPendingRelationships() {
-		return this.pendingRelationships.map(p => ({
+		return this.pendingRelationships.map((p) => ({
 			childLogicalId: this.elementRegistry.get(p.childElement)?.logicalId,
 			parentId: p.parentId,
 			age: Date.now() - p.registrationTime
@@ -765,7 +787,7 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 
 	getElementTree(): Record<string, any> {
 		const result: Record<string, any> = {};
-		
+
 		for (const [_element, metadata] of this.elementRegistry) {
 			const key = `${metadata.logicalId} (${metadata.options.displayName || 'unnamed'})`;
 			result[key] = {
@@ -778,16 +800,29 @@ export class FocusManager implements Reactive<Focusable | undefined> {
 					onFocus: !!metadata.options.onFocus,
 					onBlur: !!metadata.options.onBlur
 				},
-				children: metadata.children.map(child => {
+				children: metadata.children.map((child) => {
 					const childMeta = this.elementRegistry.get(child);
-					return childMeta ? 
-						`${childMeta.logicalId} (${childMeta.options.displayName || 'unnamed'})` : 
-						'unknown';
+					return childMeta
+						? `${childMeta.logicalId} (${childMeta.options.displayName || 'unnamed'})`
+						: 'unknown';
 				})
 			};
 		}
-		
+
 		return result;
+	}
+
+	setCursor(cursor: Cursor): () => void {
+		console.log('cursor set!', cursor);
+		if (this.cursor) {
+			throw new Error('There should only ever be one instance of the focus cursor');
+		}
+
+		this.cursor = cursor;
+
+		return () => {
+			this.cursor = undefined;
+		};
 	}
 }
 
