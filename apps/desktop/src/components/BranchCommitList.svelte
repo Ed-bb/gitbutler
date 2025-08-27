@@ -175,12 +175,15 @@
 				return 'Interactive integration';
 		}
 	}
+
+	let itegrationOptionDropdown: ReturnType<typeof DropdownButton> | undefined;
 </script>
 
 <BranchIntegrationModal bind:modalRef={integrationModal} {projectId} {stackId} {branchName} />
 
 {#snippet integrateUpstreamButton()}
 	<DropdownButton
+		bind:this={itegrationOptionDropdown}
 		testId={TestId.UpstreamCommitsIntegrateButton}
 		style="warning"
 		kind="solid"
@@ -193,14 +196,18 @@
 			<ContextMenuSection>
 				<ContextMenuItem
 					label="Rebase upstream changes"
+					caption="Move your commits on top of upstream changes. Creates clean, linear history."
 					onclick={() => {
 						integrationMode.set('rebase');
+						itegrationOptionDropdown?.close();
 					}}
 				/>
 				<ContextMenuItem
 					label="Interactive integration"
+					caption="Review and resolve any conflicts before completing the integration."
 					onclick={() => {
 						integrationMode.set('interactive');
+						itegrationOptionDropdown?.close();
 					}}
 				/>
 			</ContextMenuSection>
