@@ -33,7 +33,14 @@
 	import { combineResults } from '$lib/state/helpers';
 	import { UI_STATE } from '$lib/state/uiState.svelte';
 	import { inject } from '@gitbutler/shared/context';
-	import { Button, Modal, TestId } from '@gitbutler/ui';
+	import { persisted } from '@gitbutler/shared/persisted';
+	import {
+		ContextMenuItem,
+		ContextMenuSection,
+		DropdownButton,
+		Modal,
+		TestId
+	} from '@gitbutler/ui';
 	import { getTimeAgo } from '@gitbutler/ui/utils/timeAgo';
 	import { isDefined } from '@gitbutler/ui/utils/typeguards';
 	import type { Commit } from '$lib/branches/v3';
@@ -86,6 +93,8 @@
 	const dropzoneRegistry = inject(DROPZONE_REGISTRY);
 	const dragStateService = inject(DRAG_STATE_SERVICE);
 
+	const [integrateUpstreamCommits, integrating] = stackService.integrateUpstreamCommits;
+
 	const projectState = $derived(uiState.project(projectId));
 	const exclusiveAction = $derived(projectState.exclusiveAction.current);
 	const commitAction = $derived(exclusiveAction?.type === 'commit' ? exclusiveAction : undefined);
@@ -132,20 +141,71 @@
 	function kickOffIntegration() {
 		integrationModal?.show();
 	}
+
+	function handleRebaseIntegration() {
+		if (!stackId) return;
+		integrateUpstreamCommits({
+			projectId,
+			stackId,
+			seriesName: branchName,
+			strategy: 'rebase'
+		});
+	}
+
+	type IntegrationMode = 'rebase' | 'interactive';
+
+	const integrationMode = persisted<IntegrationMode>('rebase', 'branchUpstreamIntegrationMode');
+
+	function integrate(mode: IntegrationMode) {
+		switch (mode) {
+			case 'rebase':
+				handleRebaseIntegration();
+				break;
+			case 'interactive':
+				kickOffIntegration();
+				break;
+		}
+	}
+
+	function getLabelForIntegrationMode(mode: IntegrationMode): string {
+		switch (mode) {
+			case 'rebase':
+				return 'Rebase upstream changes';
+			case 'interactive':
+				return 'Interactive integration';
+		}
+	}
 </script>
 
 <BranchIntegrationModal bind:modalRef={integrationModal} {projectId} {stackId} {branchName} />
 
 {#snippet integrateUpstreamButton()}
-	<Button
+	<DropdownButton
 		testId={TestId.UpstreamCommitsIntegrateButton}
-		style="pop"
+		style="warning"
 		kind="solid"
 		grow
-		onclick={kickOffIntegration}
+		loading={integrating.current.isLoading}
+		onclick={() => integrate($integrationMode)}
 	>
-		Integrate changes...
-	</Button>
+		{getLabelForIntegrationMode($integrationMode)}
+		{#snippet contextMenuSlot()}
+			<ContextMenuSection>
+				<ContextMenuItem
+					label="Rebase upstream changes"
+					onclick={() => {
+						integrationMode.set('rebase');
+					}}
+				/>
+				<ContextMenuItem
+					label="Interactive integration"
+					onclick={() => {
+						integrationMode.set('interactive');
+					}}
+				/>
+			</ContextMenuSection>
+		{/snippet}
+	</DropdownButton>
 {/snippet}
 
 {#snippet commitReorderDz(dropzone: ReorderCommitDzHandler)}
