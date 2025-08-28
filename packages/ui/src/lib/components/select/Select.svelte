@@ -138,7 +138,7 @@
 		setMaxHeight();
 		listOpen = true;
 		ontoggle?.(true);
-		
+
 		// Auto-focus search input when dropdown opens and search is available
 		if (searchable && options.length > 5) {
 			setTimeout(() => {
