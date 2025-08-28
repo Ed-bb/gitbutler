@@ -82,6 +82,7 @@
 
 	let selectWrapperEl: HTMLElement;
 	let optionsGroupEl = $state<HTMLElement>();
+	let searchItemEl = $state<any>();
 
 	let highlightedIndex: number | undefined = $state(undefined);
 	let searchValue = $state('');
@@ -137,6 +138,13 @@
 		setMaxHeight();
 		listOpen = true;
 		ontoggle?.(true);
+		
+		// Auto-focus search input when dropdown opens and search is available
+		if (searchable && options.length > 5) {
+			setTimeout(() => {
+				searchItemEl?.focus();
+			}, 0);
+		}
 	}
 
 	function closeList() {
@@ -344,7 +352,7 @@
 			>
 				<ScrollableContainer whenToShow="scroll">
 					{#if searchable && options.length > 5}
-						<SearchItem bind:searchValue />
+						<SearchItem bind:this={searchItemEl} bind:searchValue />
 					{/if}
 					{#if groupedOptions.length === 0}
 						<OptionsGroup>

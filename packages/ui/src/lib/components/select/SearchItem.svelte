@@ -10,6 +10,10 @@
 
 	let inputEl: HTMLInputElement;
 
+	export function focus() {
+		inputEl?.focus();
+	}
+
 	function resetFilter() {
 		searchValue = '';
 		inputEl.focus();
