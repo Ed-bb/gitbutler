@@ -22,6 +22,21 @@
 	function handleInput(event: Event) {
 		searchValue = (event.target as HTMLInputElement).value;
 	}
+
+	function handleKeyDown(event: KeyboardEvent) {
+		const { key } = event;
+
+		// Allow arrow keys, Enter, and Escape to bubble up to the parent Select
+		// for dropdown navigation while keeping the search input focused
+		if (key === 'ArrowUp' || key === 'ArrowDown' || key === 'Enter' || key === 'Escape') {
+			// Don't prevent default for arrow keys so cursor behavior in input is preserved
+			// but don't stop propagation so parent can handle navigation
+			return;
+		}
+
+		// Stop other keys from bubbling up to prevent interference
+		event.stopPropagation();
+	}
 </script>
 
 <div class="container">
@@ -42,6 +57,7 @@
 		{placeholder}
 		bind:value={searchValue}
 		oninput={handleInput}
+		onkeydown={handleKeyDown}
 		autocorrect="off"
 		autocomplete="off"
 	/>

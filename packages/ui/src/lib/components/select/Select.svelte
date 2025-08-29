@@ -122,10 +122,12 @@
 		() => filteredOptions.filter((item) => !item.separator) as SelectItem<T>[]
 	);
 
-	// Auto-highlight first option when search results change
+	// Auto-highlight first option when search results change, reset when search is cleared
 	$effect(() => {
 		if (listOpen && selectableOptions.length > 0 && searchValue.length > 0) {
 			highlightedIndex = 0;
+		} else if (listOpen && searchValue.length === 0) {
+			highlightedIndex = undefined;
 		}
 	});
 	let maxHeightState = $state(maxHeight);
@@ -359,6 +361,9 @@
 				style:top={getTopStyle()}
 				style:left={getLeftStyle()}
 				style:max-height={maxHeightState && `${maxHeightState}px`}
+				role="listbox"
+				tabindex="-1"
+				onkeydown={(ev: KeyboardEvent) => handleKeyDown(ev)}
 			>
 				<ScrollableContainer whenToShow="scroll">
 					{#if searchable && options.length > 5}
