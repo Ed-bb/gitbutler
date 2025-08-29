@@ -121,6 +121,13 @@
 	const selectableOptions = $derived.by(
 		() => filteredOptions.filter((item) => !item.separator) as SelectItem<T>[]
 	);
+
+	// Auto-highlight first option when search results change
+	$effect(() => {
+		if (listOpen && selectableOptions.length > 0 && searchValue.length > 0) {
+			highlightedIndex = 0;
+		}
+	});
 	let maxHeightState = $state(maxHeight);
 	let listOpen = $state(false);
 	let inputBoundingRect = $state<DOMRect>();
@@ -194,6 +201,9 @@
 		const option = highlightedIndex !== undefined ? selectableOptions[highlightedIndex] : undefined;
 		if (option) {
 			handleSelect(option, event);
+		} else if (selectableOptions.length > 0) {
+			// If no option is highlighted but options exist, select the first one
+			handleSelect(selectableOptions[0], event);
 		}
 	}
 
