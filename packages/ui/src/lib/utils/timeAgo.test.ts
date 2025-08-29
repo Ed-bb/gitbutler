@@ -92,10 +92,10 @@ describe.concurrent('getAbsoluteTimestamp', () => {
 	it('should handle different times of day', () => {
 		const morningDate = new Date('2024-03-10T08:15:00.000Z');
 		const eveningDate = new Date('2024-03-10T20:30:00.000Z');
-		
+
 		const morningResult = getAbsoluteTimestamp(morningDate);
 		const eveningResult = getAbsoluteTimestamp(eveningDate);
-		
+
 		expect(morningResult).toMatch(/March 10, 2024 at \d{1,2}:\d{2} [AP]M/);
 		expect(eveningResult).toMatch(/March 10, 2024 at \d{1,2}:\d{2} [AP]M/);
 	});
