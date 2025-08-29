@@ -83,6 +83,7 @@
 	let selectWrapperEl: HTMLElement;
 	let optionsGroupEl = $state<HTMLElement>();
 	let searchItemEl = $state<any>();
+	let selectTriggerEl = $state<HTMLElement | { focus(): void }>();
 
 	let highlightedIndex: number | undefined = $state(undefined);
 	let searchValue = $state('');
@@ -156,9 +157,16 @@
 		}
 	}
 
-	function closeList() {
+	function closeList(maintainFocus: boolean = false) {
 		listOpen = false;
 		ontoggle?.(false);
+
+		// Maintain focus on the select trigger if requested
+		if (maintainFocus && selectTriggerEl) {
+			setTimeout(() => {
+				selectTriggerEl?.focus();
+			}, 0);
+		}
 	}
 
 	function clickOutside(e: MouseEvent) {
@@ -196,7 +204,10 @@
 				}
 			: undefined;
 		onselect?.(value, modifiers);
-		closeList();
+
+		// Maintain focus if selection was made via keyboard
+		const isKeyboardSelection = event instanceof KeyboardEvent;
+		closeList(isKeyboardSelection);
 	}
 
 	function handleEnter(event: KeyboardEvent) {
@@ -320,6 +331,7 @@
 	{/if}
 	{#if customSelectButton}
 		<div
+			bind:this={selectTriggerEl}
 			role="presentation"
 			class="select__custom-button"
 			onmousedown={toggleList}
@@ -329,6 +341,7 @@
 		</div>
 	{:else}
 		<Textbox
+			bind:this={selectTriggerEl}
 			{id}
 			{placeholder}
 			readonly
