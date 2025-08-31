@@ -11,8 +11,8 @@
 	import { getColorFromCommitState, getIconFromCommitState } from '$components/lib';
 	import { REORDER_DROPZONE_FACTORY } from '$lib/dragging/stackingReorderDropzoneManager';
 	import { editPatch } from '$lib/editMode/editPatchUtils';
+	import { focusable } from '$lib/focus/focusable';
 	import { DEFAULT_FORGE_FACTORY } from '$lib/forge/forgeFactory.svelte';
-	import { INTELLIGENT_SCROLLING_SERVICE } from '$lib/intelligentScrolling/service';
 	import { MODE_SERVICE } from '$lib/mode/modeService';
 	import { STACK_SERVICE } from '$lib/stacks/stackService.svelte';
 	import { combineResults } from '$lib/state/helpers';
@@ -44,7 +44,6 @@
 	const modeService = inject(MODE_SERVICE);
 	const forge = inject(DEFAULT_FORGE_FACTORY);
 	const urlService = inject(URL_SERVICE);
-	const intelligentScrollingService = inject(INTELLIGENT_SCROLLING_SERVICE);
 
 	const [insertBlankCommitInBranch, commitInsertion] = stackService.insertBlankCommit;
 
@@ -125,7 +124,7 @@
 	const canPublishPR = $derived(forge.current.authenticated);
 </script>
 
-<div class="branches-wrapper">
+<div class="branches-wrapper" use:focusable={{ list: true, disabled: branches.length <= 1 }}>
 	{#each branches as branch, i}
 		{@const branchName = branch.name}
 		{@const localAndRemoteCommits = stackService.commits(projectId, stackId, branchName)}
@@ -189,7 +188,6 @@
 					readonly={!!branch.remoteTrackingBranch}
 					onclick={() => {
 						uiState.lane(laneId).selection.set({ branchName });
-						intelligentScrollingService.show(projectId, laneId, 'details');
 						onselect?.();
 					}}
 				>

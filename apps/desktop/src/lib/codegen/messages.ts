@@ -192,7 +192,10 @@ const webRequestCost = 10;
  * For some reason the final quantity of tokens ends up slightly greater than if
  * you were using the result. I'm not entirly sure where the discrepency is.
  */
-export function usageStats(events: ClaudeMessage[]): { tokens: number; cost: number } {
+export function usageStats(events: ClaudeMessage[]): {
+	tokens: number;
+	cost: number;
+} {
 	let tokens = 0;
 	let cost = 0;
 	for (const event of events) {
@@ -262,6 +265,15 @@ export function lastUserMessageSentAt(events: ClaudeMessage[]): Date | undefined
 	}
 	if (!event) return;
 	return new Date(event.createdAt);
+}
+
+/**
+ * Gets the timestamp of the last interaction (any message) in the chat
+ */
+export function lastInteractionTime(events: ClaudeMessage[]): Date | undefined {
+	if (events.length === 0) return undefined;
+	const lastEvent = events[events.length - 1];
+	return lastEvent ? new Date(lastEvent.createdAt) : undefined;
 }
 
 /**

@@ -3,6 +3,7 @@ use bstr::{BStr, BString, ByteSlice};
 use but_core::cmd::prepare_with_shell_on_windows;
 use but_core::{GitConfigSettings, RepositoryExt};
 use gitbutler_error::error::Code;
+use gix::config::Source;
 use gix::objs::WriteTo;
 use std::borrow::Cow;
 use std::io::Write;
@@ -25,7 +26,7 @@ pub enum DateMode {
 /// user comments and custom formatting.
 pub fn save_author_if_unset_in_repo<'a, 'b>(
     repo: &gix::Repository,
-    destination: gix::config::Source,
+    destination: Source,
     name: impl Into<&'a BStr>,
     email: impl Into<&'b BStr>,
 ) -> anyhow::Result<()> {

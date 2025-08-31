@@ -2,6 +2,8 @@
 	import CommitLine from '$components/CommitLine.svelte';
 	import CommitTitle from '$components/CommitTitle.svelte';
 	import { type CommitStatusType } from '$lib/commits/commit';
+	import { DefinedFocusable } from '$lib/focus/focusManager';
+	import { focusable } from '$lib/focus/focusable';
 	import { Avatar, Icon, TestId } from '@gitbutler/ui';
 
 	import { slide } from 'svelte/transition';
@@ -25,6 +27,7 @@
 		isOpen?: boolean;
 		active?: boolean;
 		hasConflicts?: boolean;
+		disabled?: boolean;
 		menu?: Snippet<[{ rightClickTrigger: HTMLElement }]>;
 		onclick?: () => void;
 	};
@@ -69,16 +72,18 @@
 		opacity,
 		borderTop,
 		isOpen,
-		active,
+		disabled,
+		hasConflicts,
 		onclick,
 		menu,
-		hasConflicts,
 		...args
 	}: Props = $props();
 
+	const active = $derived(selected);
 	let container = $state<HTMLDivElement>();
 </script>
 
+<!-- svelte-ignore a11y_click_events_have_key_events -->
 <div
 	data-testid={TestId.CommitRow}
 	bind:this={container}
@@ -93,11 +98,18 @@
 	style:opacity
 	class:border-top={borderTop || first}
 	class:last={lastCommit}
+	class:disabled
 	{onclick}
-	onkeydown={(e) => {
-		if (e.key === 'Enter' || e.key === ' ') {
-			e.stopPropagation();
-			onclick?.();
+	use:focusable={{
+		id: DefinedFocusable.Commit,
+		onKeydown: (e) => {
+			if (disabled) return false;
+
+			if (e.key === 'Enter' || e.key === ' ' || (!e.metaKey && e.key === 'ArrowRight')) {
+				e.stopPropagation();
+				onclick?.();
+				return true;
+			}
 		}
 	}}
 >
@@ -107,6 +119,12 @@
 			class:active
 			in:slide={{ axis: 'x', duration: 150 }}
 		></div>
+	{/if}
+
+	{#if !selected && !args.disableCommitActions}
+		<div class="commit-row__drag-handle">
+			<Icon name="draggable-narrow" />
+		</div>
 	{/if}
 
 	<CommitLine
@@ -150,11 +168,17 @@
 		position: relative;
 		width: 100%;
 		overflow: hidden;
+		outline: none;
 		transition: background-color var(--transition-fast);
 
 		&:hover,
 		&.menu-shown {
 			background-color: var(--clr-bg-1-muted);
+		}
+
+		&:hover .commit-row__drag-handle {
+			opacity: 1;
+			pointer-events: auto;
 		}
 
 		&:not(.last) {
@@ -167,6 +191,10 @@
 
 		&.active.selected {
 			background-color: var(--clr-selected-in-focus-bg);
+		}
+
+		&.disabled {
+			pointer-events: none;
 		}
 	}
 
@@ -210,5 +238,15 @@
 		display: flex;
 		margin-right: 4px;
 		color: var(--clr-theme-err-element);
+	}
+
+	.commit-row__drag-handle {
+		position: absolute;
+		top: 50%;
+		left: 0;
+		transform: translateY(-50%);
+		color: var(--clr-text-3);
+		opacity: 0;
+		pointer-events: none;
 	}
 </style>

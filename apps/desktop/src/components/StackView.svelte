@@ -10,14 +10,10 @@
 	import Resizer from '$components/Resizer.svelte';
 	import SelectionView from '$components/SelectionView.svelte';
 	import WorktreeChanges from '$components/WorktreeChanges.svelte';
+	import { stagingBehaviorFeature } from '$lib/config/uiFeatureFlags';
 	import { isParsedError } from '$lib/error/parser';
-	import { DefinedFocusable } from '$lib/focus/focusManager.svelte';
-	import { focusable } from '$lib/focus/focusable.svelte';
+	import { focusable } from '$lib/focus/focusable';
 	import { DIFF_SERVICE } from '$lib/hunks/diffService.svelte';
-	import {
-		INTELLIGENT_SCROLLING_SERVICE,
-		scrollingAttachment
-	} from '$lib/intelligentScrolling/service';
 	import { ID_SELECTION } from '$lib/selection/idSelection.svelte';
 	import {
 		createBranchSelection,
@@ -68,7 +64,6 @@
 	const diffService = inject(DIFF_SERVICE);
 	const uncommittedService = inject(UNCOMMITTED_SERVICE);
 	const uiState = inject(UI_STATE);
-	const intelligentScrollingService = inject(INTELLIGENT_SCROLLING_SERVICE);
 	const idSelection = inject(ID_SELECTION);
 
 	const projectState = $derived(uiState.project(projectId));
@@ -153,7 +148,7 @@
 		}
 	} as const;
 
-	function checkFilesForCommit() {
+	function checkSelectedFilesForCommit() {
 		const stackAssignments = stackId ? uncommittedService.getAssignmentsByStackId(stackId) : [];
 		if (stackId && stackAssignments.length > 0) {
 			// If there are assignments for this stack, we check those.
@@ -182,6 +177,41 @@
 		}
 	}
 
+	function uncheckAll() {
+		if (stackId) {
+			uncommittedService.uncheckAll(stackId);
+		}
+		uncommittedService.uncheckAll(null);
+	}
+
+	function checkAllFiles() {
+		const stackAssignments = stackId ? uncommittedService.getAssignmentsByStackId(stackId) : [];
+		if (stackId && stackAssignments.length > 0) {
+			// If there are assignments for this stack, we check those.
+			uncommittedService.checkAll(stackId);
+			// Uncheck the unassigned files.
+			uncommittedService.uncheckAll(null);
+			return;
+		}
+
+		uncommittedService.checkAll(null);
+	}
+
+	function checkFilesForCommit(): true {
+		switch ($stagingBehaviorFeature) {
+			case 'all':
+				checkAllFiles();
+				return true;
+			case 'selection':
+				// We only check the selected files.
+				checkSelectedFilesForCommit();
+				return true;
+			case 'none':
+				uncheckAll();
+				return true;
+		}
+	}
+
 	function startCommit(branchName: string) {
 		projectState.exclusiveAction.set({
 			type: 'commit',
@@ -194,7 +224,6 @@
 
 	export function onclose() {
 		selection.set(undefined);
-		intelligentScrollingService.show(projectId, laneId, 'stack');
 	}
 
 	const startCommitVisible = $derived(uncommittedService.startCommitVisible(stackId));
@@ -268,7 +297,6 @@
 		selectionId={createWorktreeSelection({ stackId })}
 		onclose={() => {
 			idSelection.clear(createWorktreeSelection({ stackId: stackId }));
-			intelligentScrollingService.show(projectId, laneId, 'stack');
 		}}
 		draggableFiles
 	/>
@@ -280,9 +308,7 @@
 		{projectId}
 		{selectionId}
 		diffOnly={true}
-		onclose={() => {
-			intelligentScrollingService.show(projectId, laneId, 'details');
-		}}
+		onclose={() => {}}
 		draggableFiles={selectionId.type === 'commit'}
 	/>
 {/snippet}
@@ -296,8 +322,6 @@
 		active={selectedFile?.type === 'branch' &&
 			selectedFile.branchName === branchName &&
 			focusedStackId === stackId}
-		scrollToType="details"
-		scrollToId={stackId}
 		{onerror}
 		{onclose}
 	/>
@@ -316,15 +340,12 @@
 		}}
 		draggableFiles
 		active={selectedFile?.type === 'commit' && focusedStackId === stackId}
-		scrollToType="details"
-		scrollToId={stackId}
 		{onerror}
 		{onclose}
 	/>
 {/snippet}
 
 {#snippet commitChangedFiles(commitId: string)}
-	{@const active = activeSelectionId?.type === 'commit' && focusedStackId === stackId}
 	{@const changesResult = stackService.commitChanges(projectId, commitId)}
 	<ReduxResult {projectId} {stackId} result={changesResult.current}>
 		{#snippet children(changes, { projectId, stackId })}
@@ -350,7 +371,6 @@
 				stats={changes.stats}
 				conflictEntries={changes.conflictEntries}
 				{ancestorMostConflictedCommitId}
-				{active}
 				resizer={{
 					persistId: `changed-files-${stackId}`,
 					direction: 'down',
@@ -365,7 +385,6 @@
 {/snippet}
 
 {#snippet branchChangedFiles(branchName: string)}
-	{@const active = activeSelectionId?.type === 'branch' && focusedStackId === stackId}
 	{@const changesResult = stackService.branchChanges({
 		projectId,
 		stackId: stackId,
@@ -386,7 +405,6 @@
 				}}
 				changes={changes.changes}
 				stats={changes.stats}
-				{active}
 				resizer={{
 					persistId: `changed-files-${stackId}`,
 					direction: 'down',
@@ -394,7 +412,7 @@
 					maxHeight: 32,
 					defaultValue: 16
 				}}
-			></ChangedFiles>
+			/>
 		{/snippet}
 	</ReduxResult>
 {/snippet}
@@ -419,10 +437,6 @@
 			root: lanesSrollableEl
 		}
 	}}
-	use:focusable={{
-		id: DefinedFocusable.Stack + ':' + stackId,
-		parentId: DefinedFocusable.ViewportMiddle
-	}}
 >
 	{#if !isCommitting}
 		<div class="drag-handle" data-remove-from-panning data-drag-handle draggable="true">
@@ -434,8 +448,8 @@
 		<div
 			class="stack-view"
 			class:details-open={isDetailsViewOpen}
-			{@attach scrollingAttachment(intelligentScrollingService, stackId, 'stack')}
 			style:width="{$persistedStackWidth}rem"
+			use:focusable={{ list: true }}
 			bind:this={stackViewEl}
 		>
 			<ReduxResult {projectId} result={branchesResult.current}>
@@ -445,6 +459,7 @@
 						<div
 							class="assignments-wrap"
 							class:assignments__empty={changes.current.length === 0 && !isCommitting}
+							use:focusable
 						>
 							<div
 								class="worktree-wrap"
@@ -457,7 +472,6 @@
 									{projectId}
 									{stackId}
 									mode="assigned"
-									active={focusedStackId === stackId}
 									dropzoneVisible={changes.current.length === 0 && !isCommitting}
 									onDropzoneActivated={(activated) => {
 										dropzoneActivated = activated;
@@ -465,7 +479,6 @@
 									onselect={() => {
 										// Clear one selection when you modify the other.
 										laneState?.selection.set(undefined);
-										intelligentScrollingService.show(projectId, laneId, 'diff');
 									}}
 								>
 									{#snippet emptyPlaceholder()}
@@ -512,7 +525,6 @@
 							onselect={() => {
 								// Clear one selection when you modify the other.
 								idSelection.clear({ type: 'worktree', stackId: stackId });
-								intelligentScrollingService.show(projectId, laneId, 'details');
 							}}
 						/>
 					</div>
@@ -545,59 +557,62 @@
 			bind:this={compactDiv}
 			data-details={stackId}
 			style:right="{DETAILS_RIGHT_PADDING_REM}rem"
+			use:focusable={{ list: true }}
 		>
-			<!-- TOP SECTION: Branch/Commit Details (no resizer) -->
-			{#if branchName && commitId}
-				{@render commitView(branchName, commitId)}
-			{:else if branchName}
-				{@render branchView(branchName)}
-			{/if}
+			<div class="details-view__inner">
+				<!-- TOP SECTION: Branch/Commit Details (no resizer) -->
+				{#if branchName && commitId}
+					{@render commitView(branchName, commitId)}
+				{:else if branchName}
+					{@render branchView(branchName)}
+				{/if}
 
-			<!-- MIDDLE SECTION: Changed Files (with resizer) -->
-			{#if branchName && commitId}
-				{@render commitChangedFiles(commitId)}
-			{:else if branchName}
-				{@render branchChangedFiles(branchName)}
-			{/if}
+				<!-- MIDDLE SECTION: Changed Files (with resizer) -->
+				{#if branchName && commitId}
+					{@render commitChangedFiles(commitId)}
+				{:else if branchName}
+					{@render branchChangedFiles(branchName)}
+				{/if}
 
-			<!-- BOTTOM SECTION: File Preview (no resizer) -->
-			{#if assignedStackId || selectedFile}
-				<ReduxResult {projectId} result={previewChangeResult?.current}>
-					{#snippet children(previewChange)}
-						{@const diffResult = diffService.getDiff(projectId, previewChange)}
-						{@const diffData = diffResult.current.data}
+				<!-- BOTTOM SECTION: File Preview (no resizer) -->
+				{#if assignedStackId || selectedFile}
+					<ReduxResult {projectId} result={previewChangeResult?.current}>
+						{#snippet children(previewChange)}
+							{@const diffResult = diffService.getDiff(projectId, previewChange)}
+							{@const diffData = diffResult.current.data}
 
-						<div class="file-preview-section">
-							{#if assignedStackId}
-								<ConfigurableScrollableContainer
-									zIndex="var(--z-lifted)"
-									bind:viewport={selectionPreviewScrollContainer}
-								>
-									{@render assignedChangePreview(assignedStackId)}
-								</ConfigurableScrollableContainer>
-							{:else if selectedFile}
-								<Drawer>
-									{#snippet header()}
-										<FileViewHeader
-											noPaddings
-											transparent
-											filePath={previewChange.path}
-											fileStatus={computeChangeStatus(previewChange)}
-											linesAdded={diffData?.type === 'Patch'
-												? diffData.subject.linesAdded
-												: undefined}
-											linesRemoved={diffData?.type === 'Patch'
-												? diffData.subject.linesRemoved
-												: undefined}
-										/>
-									{/snippet}
-									{@render otherChangePreview(selectedFile)}
-								</Drawer>
-							{/if}
-						</div>
-					{/snippet}
-				</ReduxResult>
-			{/if}
+							<div class="file-preview-section">
+								{#if assignedStackId}
+									<ConfigurableScrollableContainer
+										zIndex="var(--z-lifted)"
+										bind:viewport={selectionPreviewScrollContainer}
+									>
+										{@render assignedChangePreview(assignedStackId)}
+									</ConfigurableScrollableContainer>
+								{:else if selectedFile}
+									<Drawer>
+										{#snippet header()}
+											<FileViewHeader
+												noPaddings
+												transparent
+												filePath={previewChange.path}
+												fileStatus={computeChangeStatus(previewChange)}
+												linesAdded={diffData?.type === 'Patch'
+													? diffData.subject.linesAdded
+													: undefined}
+												linesRemoved={diffData?.type === 'Patch'
+													? diffData.subject.linesRemoved
+													: undefined}
+											/>
+										{/snippet}
+										{@render otherChangePreview(selectedFile)}
+									</Drawer>
+								{/if}
+							</div>
+						{/snippet}
+					</ReduxResult>
+				{/if}
+			</div>
 		</div>
 
 		<!-- DETAILS VIEW WIDTH RESIZER - Only show when details view is open -->
@@ -638,7 +653,6 @@
 		position: relative;
 		flex-shrink: 0;
 		flex-direction: column;
-		height: 100%;
 		padding: 0 12px;
 
 		/* Use CSS custom properties for details view width to avoid ResizeObserver errors */
@@ -709,6 +723,14 @@
 		border-radius: var(--radius-ml);
 		background-color: var(--clr-bg-1);
 		box-shadow: 0 10px 30px 0 color(srgb 0 0 0 / 0.16);
+	}
+
+	/* Needed for `focusCursor.svelte` to work correctly on `Drawer` components . */
+	.details-view__inner {
+		display: flex;
+		position: relative;
+		flex-direction: column;
+		overflow: hidden;
 	}
 
 	:global(.dark) .details-view {

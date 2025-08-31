@@ -121,19 +121,19 @@
 		>
 			{@render children()}
 		</div>
-		<Scrollbar
-			{whenToShow}
-			{viewport}
-			{initiallyVisible}
-			{padding}
-			{shift}
-			{thickness}
-			{zIndex}
-			{horz}
-			{onscrollexists}
-			{onthumbdrag}
-		/>
 	</div>
+	<Scrollbar
+		{whenToShow}
+		{viewport}
+		{initiallyVisible}
+		{padding}
+		{shift}
+		{thickness}
+		{zIndex}
+		{horz}
+		{onscrollexists}
+		{onthumbdrag}
+	/>
 </div>
 
 <style lang="postcss">
@@ -146,9 +146,11 @@
 	}
 	.viewport {
 		display: flex;
+		position: relative;
 		flex-direction: column;
 		width: 100%;
 		height: 100%;
+		overflow-x: hidden;
 		overflow-y: auto;
 	}
 </style>

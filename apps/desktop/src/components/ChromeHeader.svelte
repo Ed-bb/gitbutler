@@ -6,6 +6,7 @@
 	import { BASE_BRANCH_SERVICE } from '$lib/baseBranch/baseBranchService.svelte';
 	import { SETTINGS_SERVICE } from '$lib/config/appSettingsV2';
 	import { ircEnabled } from '$lib/config/uiFeatureFlags';
+	import { focusable } from '$lib/focus/focusable';
 	import { IRC_SERVICE } from '$lib/irc/ircService.svelte';
 	import { MODE_SERVICE } from '$lib/mode/modeService';
 	import { PROJECTS_SERVICE } from '$lib/project/projectsService';
@@ -42,6 +43,7 @@
 	const settingsStore = $derived(settingsService.appSettings);
 	const isWorkspace = $derived(isWorkspacePath());
 	const canUseActions = $derived($settingsStore?.featureFlags.actions ?? false);
+	const singleBranchMode = $derived($settingsStore?.featureFlags.singleBranch ?? false);
 	const backend = inject(BACKEND);
 
 	const mode = $derived(modeService.mode({ projectId }));
@@ -57,7 +59,9 @@
 		return 'gitbutler/workspace';
 	});
 
-	const isNotInWorkspace = $derived(currentBranchName !== 'gitbutler/workspace');
+	const isNotInWorkspace = $derived(
+		currentMode?.type !== 'OpenWorkspace' && currentMode?.type !== 'Edit'
+	);
 	const [setBaseBranchTarget, targetBranchSwitch] = baseBranchService.setTarget;
 
 	async function switchToWorkspace() {
@@ -104,7 +108,13 @@
 	<IntegrateUpstreamModal bind:this={modal} {projectId} />
 {/if}
 
-<div class="chrome-header" class:mac={backend.platformName === 'macos'} data-tauri-drag-region>
+<div
+	class="chrome-header"
+	class:mac={backend.platformName === 'macos'}
+	data-tauri-drag-region
+	class:single-branch={singleBranchMode}
+	use:focusable
+>
 	<div class="chrome-left" data-tauri-drag-region>
 		<div class="chrome-left-buttons" class:macos={backend.platformName === 'macos'}>
 			<SyncButton {projectId} disabled={actionsDisabled} />
@@ -199,17 +209,19 @@
 					</SelectItem>
 				</OptionsGroup>
 			</Select>
-			<Tooltip text="Current branch">
-				<div class="chrome-current-branch">
-					<div class="chrome-current-branch__content">
-						<Icon name="branch-remote" color="var(--clr-text-2)" />
-						<span class="text-12 text-semibold clr-text-1">{currentBranchName}</span>
-						{#if isNotInWorkspace}
-							<span class="text-12 text-semibold clr-text-2"> read-only </span>
-						{/if}
+			{#if singleBranchMode}
+				<Tooltip text="Current branch">
+					<div class="chrome-current-branch">
+						<div class="chrome-current-branch__content">
+							<Icon name="branch-remote" color="var(--clr-text-2)" />
+							<span class="text-12 text-semibold clr-text-1 truncate">{currentBranchName}</span>
+							{#if isNotInWorkspace}
+								<span class="text-12 text-semibold clr-text-2"> read-only </span>
+							{/if}
+						</div>
 					</div>
-				</div>
-			</Tooltip>
+				</Tooltip>
+			{/if}
 		</div>
 
 		{#if isNotInWorkspace}
@@ -347,9 +359,10 @@
 	.chrome-selector-wrapper {
 		display: flex;
 		position: relative;
+		overflow: hidden;
 	}
 
-	:global(.chrome-header .project-selector-btn) {
+	:global(.chrome-header.single-branch .project-selector-btn) {
 		border-top-right-radius: 0;
 		border-bottom-right-radius: 0;
 	}
@@ -359,12 +372,14 @@
 		align-items: center;
 		padding-right: 2px;
 		gap: 6px;
+		text-wrap: nowrap;
 	}
 
 	.chrome-current-branch {
 		display: flex;
 		align-items: center;
 		padding: 0 10px 0 6px;
+		overflow: hidden;
 		border: 1px solid var(--clr-border-2);
 		border-left: none;
 		border-top-right-radius: 100px;
@@ -375,7 +390,9 @@
 	.chrome-current-branch__content {
 		display: flex;
 		align-items: center;
+		overflow: hidden;
 		gap: 4px;
+		text-wrap: nowrap;
 		opacity: 0.7;
 	}
 
@@ -387,6 +404,7 @@
 	.chrome-center {
 		display: flex;
 		flex-shrink: 1;
+		overflow: hidden;
 		gap: 8px;
 	}
 

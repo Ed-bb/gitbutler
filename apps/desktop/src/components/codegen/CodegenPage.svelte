@@ -3,6 +3,7 @@
 	import Drawer from '$components/Drawer.svelte';
 	import ReduxResult from '$components/ReduxResult.svelte';
 	import Resizer from '$components/Resizer.svelte';
+	import ClaudeCodeSettingsModal from '$components/codegen/ClaudeCodeSettingsModal.svelte';
 	import CodegenChatLayout from '$components/codegen/CodegenChatLayout.svelte';
 	import CodegenClaudeMessage from '$components/codegen/CodegenClaudeMessage.svelte';
 	import CodegenInput from '$components/codegen/CodegenInput.svelte';
@@ -10,23 +11,26 @@
 	import CodegenSidebar from '$components/codegen/CodegenSidebar.svelte';
 	import CodegenSidebarEntry from '$components/codegen/CodegenSidebarEntry.svelte';
 	import CodegenTodo from '$components/codegen/CodegenTodo.svelte';
+	import CodegenUsageStat from '$components/codegen/CodegenUsageStat.svelte';
 	import ClaudeCheck from '$components/v3/ClaudeCheck.svelte';
 	import { CLAUDE_CODE_SERVICE } from '$lib/codegen/claude';
 	import {
 		currentStatus,
 		formatMessages,
 		getTodos,
+		lastInteractionTime,
 		lastUserMessageSentAt,
 		usageStats
 	} from '$lib/codegen/messages';
 	import { commitStatusLabel } from '$lib/commits/commit';
 	import { SETTINGS_SERVICE } from '$lib/config/appSettingsV2';
+	import { focusable } from '$lib/focus/focusable';
 	import { STACK_SERVICE } from '$lib/stacks/stackService.svelte';
 	import { combineResults } from '$lib/state/helpers';
 	import { UI_STATE } from '$lib/state/uiState.svelte';
 	import { USER } from '$lib/user/user';
 	import { inject } from '@gitbutler/shared/context';
-	import { Badge, Button } from '@gitbutler/ui';
+	import { Badge, Button, ContextMenu, ContextMenuItem, ContextMenuSection } from '@gitbutler/ui';
 
 	type Props = {
 		projectId: string;
@@ -47,6 +51,48 @@
 	let message = $state('');
 	let claudeExecutable = $derived($settingsStore?.claude.executable || 'claude');
 	let updatingExecutable = $state(false);
+	let settingsModal: ClaudeCodeSettingsModal | undefined;
+	let modelContextMenu = $state<ContextMenu>();
+	let modelTrigger = $state<HTMLButtonElement>();
+	let selectedModel = $state('Claude 3.5 Sonnet');
+	let thinkingModeContextMenu = $state<ContextMenu>();
+	let thinkingModeTrigger = $state<HTMLButtonElement>();
+	let selectedThinkingMode = $state('Normal');
+	let templateContextMenu = $state<ContextMenu>();
+	let templateTrigger = $state<HTMLButtonElement>();
+
+	const modelOptions = [
+		'Claude 3.5 Sonnet',
+		'Claude 3.5 Haiku',
+		'Claude 3 Opus',
+		'Claude 3 Sonnet',
+		'Claude 3 Haiku'
+	];
+
+	const thinkingModeOptions = ['Normal', 'Think', 'Mega Think', 'Ultra Think'];
+
+	const templateSnippets = [
+		{
+			label: 'Bug Fix',
+			template:
+				'Please fix the bug in this code:\n\n```\n// Your code here\n```\n\nExpected behavior:\nActual behavior:\nSteps to reproduce:'
+		},
+		{
+			label: 'Code Review',
+			template:
+				'Please review this code for:\n- Performance issues\n- Security vulnerabilities\n- Best practices\n- Code style\n\n```\n// Your code here\n```'
+		},
+		{
+			label: 'Refactor',
+			template:
+				'Please refactor this code to improve:\n- Readability\n- Performance\n- Maintainability\n\n```\n// Your code here\n```\n\nRequirements:'
+		},
+		{
+			label: 'Add Tests',
+			template:
+				'Please write comprehensive tests for this code:\n\n```\n// Your code here\n```\n\nTest cases should cover:\n- Happy path\n- Edge cases\n- Error conditions'
+		}
+	];
 
 	const projectState = uiState.project(projectId);
 	const selectedBranch = $derived(projectState.selectedClaudeSession.current);
@@ -124,6 +170,26 @@
 		await settingsService.updateClaude({ executable: value });
 	}
 
+	function selectModel(model: string) {
+		selectedModel = model;
+		modelContextMenu?.close();
+	}
+
+	function selectThinkingMode(mode: string) {
+		selectedThinkingMode = mode;
+		thinkingModeContextMenu?.close();
+	}
+
+	function insertTemplate(template: string) {
+		message = message + (message ? '\n\n' : '') + template;
+		templateContextMenu?.close();
+	}
+
+	function configureTemplates() {
+		// TODO: Open template configuration modal/page
+		templateContextMenu?.close();
+	}
+
 	const events = $derived(
 		claudeCodeService.messages({ projectId, stackId: selectedBranch?.stackId || '' })
 	);
@@ -131,7 +197,7 @@
 	let rightSidebarRef = $state<HTMLDivElement>();
 </script>
 
-<div class="page">
+<div class="page" use:focusable>
 	<ReduxResult result={claudeAvailable.current} {projectId}>
 		{#snippet children(claudeAvailable, { projectId })}
 			{#if claudeAvailable}
@@ -146,7 +212,9 @@
 {#snippet main({ projectId }: { projectId: string })}
 	<CodegenSidebar content={sidebarContent}>
 		{#snippet actions()}
-			<Button disabled kind="outline" icon="plus-small" size="tag">Create new</Button>
+			<Button disabled kind="outline" size="tag" icon="plus-small" reversedDirection>Add new</Button
+			>
+			<Button kind="ghost" icon="settings" size="tag" onclick={() => settingsModal?.show()} />
 		{/snippet}
 	</CodegenSidebar>
 
@@ -180,7 +248,7 @@
 							{/each}
 							{@const lastUserMessageSent = lastUserMessageSentAt(events)}
 							{#if currentStatus(events) === 'running' && lastUserMessageSent}
-								<CodegenRunningMessage {lastUserMessageSent} {onAbort} />
+								<CodegenRunningMessage {lastUserMessageSent} />
 							{/if}
 						{/snippet}
 					</ReduxResult>
@@ -192,11 +260,40 @@
 								bind:value={message}
 								loading={currentStatus(events) === 'running'}
 								onsubmit={sendMessage}
+								{onAbort}
 							>
 								{#snippet actions()}
-									<Button disabled kind="outline" icon="attachment" reversedDirection
-										>Context</Button
+									<Button
+										bind:el={modelTrigger}
+										kind="ghost"
+										icon="chevron-down"
+										onclick={() => modelContextMenu?.toggle()}
 									>
+										{selectedModel}
+									</Button>
+
+									<div class="flex m-left-8 gap-4">
+										<Button disabled kind="outline" icon="attachment" reversedDirection
+											>Context</Button
+										>
+										<Button
+											bind:el={thinkingModeTrigger}
+											kind="outline"
+											icon="brain"
+											reversedDirection
+											onclick={() => thinkingModeContextMenu?.toggle()}
+											tooltip="Thinking Mode"
+											children={selectedThinkingMode === 'Normal' ? undefined : thinkingBtnText}
+										/>
+
+										<Button
+											bind:el={templateTrigger}
+											kind="outline"
+											icon="script"
+											tooltip="Insert template"
+											onclick={() => templateContextMenu?.toggle()}
+										/>
+									</div>
 								{/snippet}
 							</CodegenInput>
 						{/snippet}
@@ -211,13 +308,31 @@
 
 {#snippet rightSidebar()}
 	<div class="right-sidebar" bind:this={rightSidebarRef}>
-		<Drawer title="Todos">
+		<Drawer title="Todos" bottomBorder>
 			<ReduxResult result={events?.current} {projectId}>
 				{#snippet children(events, { projectId: _projectId })}
 					{@const todos = getTodos(events)}
-					{#each todos as todo}
-						<CodegenTodo {todo} />
-					{/each}
+					<div class="right-sidebar-list">
+						{#each todos as todo}
+							<CodegenTodo {todo} />
+						{/each}
+					</div>
+				{/snippet}
+			</ReduxResult>
+		</Drawer>
+
+		<Drawer title="Usage">
+			<ReduxResult result={events?.current} {projectId}>
+				{#snippet children(events, { projectId: _projectId })}
+					{@const usage = usageStats(events)}
+					<div class="right-sidebar-list">
+						<CodegenUsageStat label="Tokens used:" value={usage.tokens.toString()} />
+						<CodegenUsageStat
+							label="Total cost:"
+							value={`$${usage.cost.toFixed(2)}`}
+							valueSize="large"
+						/>
+					</div>
 				{/snippet}
 			</ReduxResult>
 		</Drawer>
@@ -284,6 +399,7 @@
 				tokensUsed={usage.tokens}
 				cost={usage.cost}
 				commitCount={commits.length}
+				lastInteractionTime={lastInteractionTime(events)}
 				commits={commitsList}
 			/>
 			<!-- defining this here so it's name doesn't conflict with the
@@ -292,6 +408,7 @@
 				{@const lastBranch = headIndex === totalHeads - 1}
 				{#each commits as commit, i}
 					<CommitRow
+						disabled
 						disableCommitActions
 						commitId={commit.id}
 						commitMessage={commit.message}
@@ -323,6 +440,39 @@
 		</div>
 	</div>
 {/snippet}
+
+{#snippet thinkingBtnText()}
+	{selectedThinkingMode}
+{/snippet}
+
+<ClaudeCodeSettingsModal bind:this={settingsModal} onClose={() => {}} />
+
+<ContextMenu bind:this={modelContextMenu} leftClickTrigger={modelTrigger} side="top">
+	<ContextMenuSection>
+		{#each modelOptions as model}
+			<ContextMenuItem label={model} onclick={() => selectModel(model)} />
+		{/each}
+	</ContextMenuSection>
+</ContextMenu>
+
+<ContextMenu bind:this={thinkingModeContextMenu} leftClickTrigger={thinkingModeTrigger} side="top">
+	<ContextMenuSection title="Thinking Mode">
+		{#each thinkingModeOptions as mode}
+			<ContextMenuItem label={mode} onclick={() => selectThinkingMode(mode)} />
+		{/each}
+	</ContextMenuSection>
+</ContextMenu>
+
+<ContextMenu bind:this={templateContextMenu} leftClickTrigger={templateTrigger} side="top">
+	<ContextMenuSection title="Templates">
+		{#each templateSnippets as snippet}
+			<ContextMenuItem label={snippet.label} onclick={() => insertTemplate(snippet.template)} />
+		{/each}
+	</ContextMenuSection>
+	<ContextMenuSection>
+		<ContextMenuItem label="Configure templates..." onclick={configureTemplates} />
+	</ContextMenuSection>
+</ContextMenu>
 
 <style lang="postcss">
 	.page {
@@ -369,8 +519,17 @@
 	.right-sidebar {
 		display: flex;
 		position: relative;
+		flex-direction: column;
 		height: 100%;
 
 		border-left: 1px solid var(--clr-border-2);
+	}
+
+	.right-sidebar-list {
+		display: flex;
+		flex-direction: column;
+
+		padding: 14px;
+		gap: 12px;
 	}
 </style>

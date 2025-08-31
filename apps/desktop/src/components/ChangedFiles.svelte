@@ -4,7 +4,6 @@
 	import FileListMode from '$components/FileListMode.svelte';
 	import Resizer from '$components/Resizer.svelte';
 	import emptyFolderSvg from '$lib/assets/empty-state/empty-folder.svg?raw';
-	import { INTELLIGENT_SCROLLING_SERVICE } from '$lib/intelligentScrolling/service';
 	import { ID_SELECTION } from '$lib/selection/idSelection.svelte';
 	import { inject } from '@gitbutler/shared/context';
 	import { Badge, EmptyStatePlaceholder, LineStats } from '@gitbutler/ui';
@@ -21,7 +20,6 @@
 		changes: TreeChange[];
 		title: string;
 		stats?: TreeStats;
-		active?: boolean;
 		conflictEntries?: ConflictEntriesObj;
 		draggableFiles?: boolean;
 		grow?: boolean;
@@ -40,7 +38,6 @@
 		changes,
 		title,
 		stats,
-		active,
 		conflictEntries,
 		draggableFiles,
 		grow,
@@ -53,7 +50,6 @@
 	}: Props = $props();
 
 	const idSelection = inject(ID_SELECTION);
-	const intelligentScrollingService = inject(INTELLIGENT_SCROLLING_SERVICE);
 
 	let listMode: 'list' | 'tree' = $state('tree');
 
@@ -95,16 +91,10 @@
 				{stackId}
 				{changes}
 				{listMode}
-				{active}
 				{conflictEntries}
 				{draggableFiles}
 				{ancestorMostConflictedCommitId}
 				hideLastFileBorder={false}
-				onselect={() => {
-					if (stackId) {
-						intelligentScrollingService.show(projectId, stackId, 'diff');
-					}
-				}}
 			/>
 		{:else}
 			<EmptyStatePlaceholder image={emptyFolderSvg} width={180} gap={4}>

@@ -1,6 +1,11 @@
 <script lang="ts">
 	import ThemeSelector from '$components/ThemeSelector.svelte';
-	import { autoSelectBranchNameFeature } from '$lib/config/uiFeatureFlags';
+	import {
+		autoSelectBranchNameFeature,
+		stagingBehaviorFeature,
+		type StagingBehavior
+	} from '$lib/config/uiFeatureFlags';
+	import { focusable } from '$lib/focus/focusable';
 	import { SETTINGS, type ScrollbarVisilitySettings } from '$lib/settings/userSettings';
 	import { inject } from '@gitbutler/shared/context';
 	import {
@@ -37,16 +42,23 @@
 			scrollbarVisibilityState: selectedScrollbarVisibility
 		}));
 	}
+
+	function onStagingBehaviorFormChange(form: HTMLFormElement) {
+		const formData = new FormData(form);
+		const selectedStagingBehavior = formData.get('stagingBehaviorType') as StagingBehavior | null;
+		if (!selectedStagingBehavior) return;
+		stagingBehaviorFeature.set(selectedStagingBehavior);
+	}
 </script>
 
-<SectionCard>
+<SectionCard {focusable}>
 	{#snippet title()}
 		Theme
 	{/snippet}
 	<ThemeSelector {userSettings} />
 </SectionCard>
 <div class="stack-v">
-	<SectionCard centerAlign roundedBottom={false}>
+	<SectionCard centerAlign roundedBottom={false} {focusable}>
 		{#snippet title()}
 			Diff preview
 		{/snippet}
@@ -63,7 +75,7 @@
 		/>
 	</SectionCard>
 
-	<SectionCard orientation="column" roundedTop={false} roundedBottom={false}>
+	<SectionCard orientation="column" roundedTop={false} roundedBottom={false} {focusable}>
 		{#snippet title()}
 			Font family
 		{/snippet}
@@ -90,6 +102,7 @@
 		orientation="row"
 		roundedTop={false}
 		roundedBottom={false}
+		{focusable}
 	>
 		{#snippet title()}
 			Allow font ligatures
@@ -108,7 +121,7 @@
 		{/snippet}
 	</SectionCard>
 
-	<SectionCard orientation="row" centerAlign roundedTop={false} roundedBottom={false}>
+	<SectionCard orientation="row" centerAlign roundedTop={false} roundedBottom={false} {focusable}>
 		{#snippet title()}
 			Tab size
 		{/snippet}
@@ -136,7 +149,13 @@
 		{/snippet}
 	</SectionCard>
 
-	<SectionCard labelFor="wrapText" orientation="row" roundedTop={false} roundedBottom={false}>
+	<SectionCard
+		labelFor="wrapText"
+		orientation="row"
+		roundedTop={false}
+		roundedBottom={false}
+		{focusable}
+	>
 		{#snippet title()}
 			Soft wrap
 		{/snippet}
@@ -158,7 +177,7 @@
 		{/snippet}
 	</SectionCard>
 
-	<SectionCard orientation="row" roundedTop={false} roundedBottom={false}>
+	<SectionCard orientation="row" roundedTop={false} roundedBottom={false} {focusable}>
 		{#snippet title()}
 			Lines contrast
 		{/snippet}
@@ -190,7 +209,7 @@
 		{/snippet}
 	</SectionCard>
 
-	<SectionCard labelFor="inlineUnifiedDiffs" orientation="row" roundedTop={false}>
+	<SectionCard labelFor="inlineUnifiedDiffs" orientation="row" roundedTop={false} {focusable}>
 		{#snippet title()}
 			Display word diffs inline
 		{/snippet}
@@ -214,7 +233,7 @@
 </div>
 
 <form class="stack-v" onchange={(e) => onScrollbarFormChange(e.currentTarget)}>
-	<SectionCard roundedBottom={false} orientation="row" labelFor="scrollbar-on-scroll">
+	<SectionCard roundedBottom={false} orientation="row" labelFor="scrollbar-on-scroll" {focusable}>
 		{#snippet title()}
 			Scrollbar-On-Scroll
 		{/snippet}
@@ -236,6 +255,7 @@
 		roundedBottom={false}
 		orientation="row"
 		labelFor="scrollbar-on-hover"
+		{focusable}
 	>
 		{#snippet title()}
 			Scrollbar-On-Hover
@@ -253,7 +273,7 @@
 		{/snippet}
 	</SectionCard>
 
-	<SectionCard roundedTop={false} orientation="row" labelFor="scrollbar-always">
+	<SectionCard roundedTop={false} orientation="row" labelFor="scrollbar-always" {focusable}>
 		{#snippet title()}
 			Always show scrollbar
 		{/snippet}
@@ -268,7 +288,7 @@
 	</SectionCard>
 </form>
 
-<SectionCard labelFor="branchLaneContents" orientation="row">
+<SectionCard labelFor="branchLaneContents" orientation="row" {focusable}>
 	{#snippet title()}
 		Auto-select text on branch/lane rename
 	{/snippet}
@@ -283,3 +303,67 @@
 		/>
 	{/snippet}
 </SectionCard>
+
+<form class="stack-v" onchange={(e) => onStagingBehaviorFormChange(e.currentTarget)}>
+	<SectionCard roundedBottom={false} orientation="row" labelFor="stage-all" {focusable}>
+		{#snippet title()}
+			Stage all files
+		{/snippet}
+		{#snippet caption()}
+			Stage all files assigned to the stack on commit. If no files are staged, all unassinged files
+			will be staged.
+		{/snippet}
+		{#snippet actions()}
+			<RadioButton
+				name="stagingBehaviorType"
+				value="all"
+				id="stage-all"
+				checked={$stagingBehaviorFeature === 'all'}
+			/>
+		{/snippet}
+	</SectionCard>
+
+	<SectionCard
+		roundedTop={false}
+		roundedBottom={false}
+		orientation="row"
+		labelFor="stage-selection"
+		{focusable}
+	>
+		{#snippet title()}
+			Stage selected files
+		{/snippet}
+		{#snippet caption()}
+			Stage the selected assigned files to the stack on commit. If no files are selected, stage all
+			files. If there are no assigned files, stage all selected unassigned files. And if no files
+			are selected, stage all unassigned files.
+		{/snippet}
+		{#snippet actions()}
+			<RadioButton
+				name="stagingBehaviorType"
+				value="selection"
+				id="stage-selection"
+				checked={$stagingBehaviorFeature === 'selection'}
+			/>
+		{/snippet}
+	</SectionCard>
+
+	<SectionCard roundedTop={false} orientation="row" labelFor="stage-none" {focusable}>
+		{#snippet title()}
+			Don't stage files automatically
+		{/snippet}
+		{#snippet caption()}
+			Do not stage any files automatically.
+			<br />
+			You're more of a DIY developer in that way.
+		{/snippet}
+		{#snippet actions()}
+			<RadioButton
+				name="stagingBehaviorType"
+				value="none"
+				id="stage-none"
+				checked={$stagingBehaviorFeature === 'none'}
+			/>
+		{/snippet}
+	</SectionCard>
+</form>

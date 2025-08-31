@@ -5,8 +5,8 @@
 	import WorktreeTipsFooter from '$components/WorktreeTipsFooter.svelte';
 	import noChanges from '$lib/assets/illustrations/no-changes.svg?raw';
 	import { SETTINGS_SERVICE } from '$lib/config/appSettingsV2';
-	import { DefinedFocusable } from '$lib/focus/focusManager.svelte';
-	import { INTELLIGENT_SCROLLING_SERVICE } from '$lib/intelligentScrolling/service';
+	import { stagingBehaviorFeature } from '$lib/config/uiFeatureFlags';
+	import { focusable } from '$lib/focus/focusable';
 	import { ID_SELECTION } from '$lib/selection/idSelection.svelte';
 	import { createWorktreeSelection } from '$lib/selection/key';
 	import { UNCOMMITTED_SERVICE } from '$lib/selection/uncommittedService.svelte';
@@ -16,16 +16,14 @@
 
 	interface Props {
 		projectId: string;
-		focus: DefinedFocusable;
 	}
 
-	const { projectId, focus }: Props = $props();
+	const { projectId }: Props = $props();
 
 	const selectionId = createWorktreeSelection({ stackId: undefined });
 
 	const uiState = inject(UI_STATE);
 	const uncommittedService = inject(UNCOMMITTED_SERVICE);
-	const intelligentScrollingService = inject(INTELLIGENT_SCROLLING_SERVICE);
 	const idSelection = inject(ID_SELECTION);
 	const settingsService = inject(SETTINGS_SERVICE);
 	const settingsStore = $derived(settingsService.appSettings);
@@ -58,7 +56,7 @@
 		unassignedSidebaFolded.set(true);
 	}
 
-	function checkFilesForCommit() {
+	function checkSelectedFilesForCommit() {
 		const selectionId = createWorktreeSelection({});
 		const selectedPaths = idSelection.values(selectionId).map((entry) => entry.path);
 
@@ -67,6 +65,29 @@
 			uncommittedService.checkFiles(null, selectedPaths);
 		} else {
 			uncommittedService.checkAll(null);
+		}
+	}
+
+	function uncheckAll() {
+		uncommittedService.uncheckAll(null);
+	}
+
+	function checkAllFiles() {
+		uncommittedService.checkAll(null);
+	}
+
+	function checkFilesForCommit(): true {
+		switch ($stagingBehaviorFeature) {
+			case 'all':
+				checkAllFiles();
+				return true;
+			case 'selection':
+				// We only check the selected files.
+				checkSelectedFilesForCommit();
+				return true;
+			case 'none':
+				uncheckAll();
+				return true;
 		}
 	}
 </script>
@@ -90,17 +111,11 @@
 				title="Unassigned"
 				{projectId}
 				stackId={undefined}
-				active={selectionId.type === 'worktree' &&
-					selectionId.stackId === undefined &&
-					focus === DefinedFocusable.ViewportLeft}
 				onscrollexists={(exists: boolean) => {
 					isScrollable = exists;
 				}}
 				overflow
 				mode="unassigned"
-				onselect={() => {
-					intelligentScrollingService.unassignedFileClicked(projectId);
-				}}
 				foldButton={$settingsStore?.featureFlags.rules ? undefined : foldButton}
 			>
 				{#snippet emptyPlaceholder()}
@@ -151,6 +166,7 @@
 		class="unassigned-folded"
 		ondblclick={unfoldView}
 		class:changes-to-commit={changesToCommit}
+		use:focusable
 	>
 		<UnassignedFoldButton active={true} onclick={unfoldView} />
 
